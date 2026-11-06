@@ -1,0 +1,135 @@
+package ling.printer.mixin;
+
+import ling.printer.runtime.RuntimeAccess;
+import ling.printer.utils.mods.QuickShulkerBridge;
+import ling.printer.utils.mods.ChestTrackerBridge;
+import ling.printer.utils.minecraft.NetworkUtils;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket;
+import net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket;
+import net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket;
+import net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket;
+import ling.printer.integration.quickshulker.QuickShulkerDiagnostics;
+import net.minecraft.network.protocol.game.ClientboundOpenScreenPacket;
+import net.minecraft.network.protocol.game.ServerboundContainerClosePacket;
+import net.minecraft.world.inventory.MenuType;
+//#if MC >= 12103
+import net.minecraft.network.protocol.game.ClientboundSetCursorItemPacket;
+//#endif
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+
+@Mixin(ClientPacketListener.class)
+public abstract class MixinClientPacketListener {
+
+    @Inject(at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/screens/MenuScreens;create(Lnet/minecraft/world/inventory/MenuType;Lnet/minecraft/client/Minecraft;ILnet/minecraft/network/chat/Component;)V"), method = "handleOpenScreen")
+    private void printer$trackQuickShulkerContainerOpen(ClientboundOpenScreenPacket packet, CallbackInfo ci) {
+        if ((Object) this != Minecraft.getInstance().getConnection()) return;
+        ling.printer.integration.quickshulker.InventoryRecoveryFence.invalidate(
+                ((ClientPacketListener) (Object) this).getConnection());
+        QuickShulkerBridge.onContainerOpen(packet.getContainerId(), packet.getType());
+        RuntimeAccess.get().containerSync().opened(packet.getContainerId(), packet.getType());
+    }
+
+    @Inject(
+            method = "handleOpenScreen",
+            at = @At(
+                    value = "INVOKE",
+                    target = "Lnet/minecraft/client/gui/screens/MenuScreens;create(Lnet/minecraft/world/inventory/MenuType;Lnet/minecraft/client/Minecraft;ILnet/minecraft/network/chat/Component;)V"
+            ),
+            cancellable = true
+    )
+    private void suppressTaskAnvilScreen(ClientboundOpenScreenPacket packet, CallbackInfo ci) {
+        if (packet.getType() != MenuType.ANVIL
+                || RuntimeAccess.get().actionBroker().consumeManualAnvilScreenAllowance()) {
+            return;
+        }
+        if (RuntimeAccess.get().actionBroker().consumeTaskAnvilScreenSuppression()) {
+            NetworkUtils.sendPacket(new ServerboundContainerClosePacket(packet.getContainerId()));
+            ci.cancel();
+        }
+    }
+
+    @Inject(at = @At("TAIL"), method = "handleOpenScreen")
+    private void printer$trackContainerOpen(ClientboundOpenScreenPacket packet, CallbackInfo ci) {
+        if ((Object) this != Minecraft.getInstance().getConnection()) return;
+        ChestTrackerBridge.onContainerOpen(packet.getContainerId());
+    }
+
+    @Inject(at = @At("TAIL"), method = "handleContainerContent")
+    public void onInventory(ClientboundContainerSetContentPacket packet, CallbackInfo ci) {
+        Minecraft client = Minecraft.getInstance();
+        //#if MC >= 12105
+        int containerId = packet.containerId();
+        //#else
+        //$$ int containerId = packet.getContainerId();
+        //#endif
+        //#if MC >= 12105
+        var items = packet.items();
+        var carried = packet.carriedItem();
+        //#else
+        //$$ var items = packet.getItems();
+        //$$ var carried = packet.getCarriedItem();
+        //#endif
+        if ((Object) this != client.getConnection()) return;
+        //#if MC >= 12105
+        ChestTrackerBridge.onContainerContent(containerId, packet.stateId(), items, carried);
+        //#else
+        //$$ ChestTrackerBridge.onContainerContent(containerId, packet.getStateId(), items, carried);
+        //#endif
+        boolean currentContainer = client.player != null && containerId == client.player.containerMenu.containerId;
+        QuickShulkerBridge.onInventoryContent(containerId, items, carried);
+        if (!currentContainer) return;
+        //#if MC >= 12105
+        RuntimeAccess.get().containerSync().content(containerId, packet.stateId(), items, carried);
+        //#else
+        //$$ RuntimeAccess.get().containerSync().content(containerId, packet.getStateId(), items, carried);
+        //#endif
+    }
+    @Inject(at = @At("TAIL"), method = "handleContainerSetSlot")
+    private void printer$confirmQuickShulkerSlot(ClientboundContainerSetSlotPacket packet, CallbackInfo ci) {
+        if ((Object) this != Minecraft.getInstance().getConnection()) return;
+        QuickShulkerBridge.onSlotUpdate(packet.getContainerId(), packet.getSlot(), packet.getItem());
+    }
+
+    //#if MC >= 12004
+    @Inject(at = @At("TAIL"), method = "handleContainerSetData")
+    private void printer$trackContainerSyncData(net.minecraft.network.protocol.game.ClientboundContainerSetDataPacket packet, CallbackInfo ci) {
+        if ((Object) this != Minecraft.getInstance().getConnection()) return;
+        RuntimeAccess.get().containerSync().data(packet.getContainerId(), packet.getId());
+    }
+    //#endif
+
+    @Inject(at = @At("TAIL"), method = "handleContainerClose")
+    private void printer$invalidateRecoveryMenu(net.minecraft.network.protocol.game.ClientboundContainerClosePacket packet, CallbackInfo ci) {
+        if ((Object) this != Minecraft.getInstance().getConnection()) return;
+        ling.printer.integration.quickshulker.InventoryRecoveryFence.invalidate(
+                ((ClientPacketListener) (Object) this).getConnection());
+    }
+
+    @Inject(at = @At("TAIL"), method = "handleAwardStats")
+    private void printer$confirmRecoveryFence(net.minecraft.network.protocol.game.ClientboundAwardStatsPacket packet, CallbackInfo ci) {
+        ling.printer.integration.quickshulker.InventoryRecoveryFence.received(
+                ((ClientPacketListener) (Object) this).getConnection());
+    }
+    //#if MC >= 12103
+    @Inject(at = @At("TAIL"), method = "handleSetCursorItem")
+    private void printer$trackCursor(ClientboundSetCursorItemPacket packet, CallbackInfo ci) {
+        if ((Object) this != Minecraft.getInstance().getConnection()) return;
+        QuickShulkerBridge.onSlotUpdate(-1, -1, packet.contents());
+    }
+    //#endif
+    @Inject(at = @At("TAIL"), method = "handleBlockUpdate")
+    private void printer$logBlockReply(ClientboundBlockUpdatePacket packet, CallbackInfo ci) {
+        QuickShulkerDiagnostics.blockReply(packet.getPos(), packet.getBlockState());
+    }
+
+    @Inject(at = @At("TAIL"), method = "handleChunkBlocksUpdate")
+    private void printer$logSectionReply(ClientboundSectionBlocksUpdatePacket packet, CallbackInfo ci) {
+        if (QuickShulkerDiagnostics.enabled()) packet.runUpdates(QuickShulkerDiagnostics::blockReply);
+    }
+}

@@ -1,0 +1,27 @@
+# 统一编码与换行，避免 Windows 上提交出 CRLF/GBK 差异
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{json,yml,yaml,md,gradle,kts,properties}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.bat]
+end_of_line = crlf
+
+[*.java]
+indent_size = 4
+max_line_length = 140
+
+[{gradlew,*.sh}]
+end_of_line = lf
+insert_final_newline = true

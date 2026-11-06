@@ -1,0 +1,15 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "ling.printer.mixin",
+  "compatibilityLevel": "${compatibility_level}",
+  "plugin": "ling.printer.mixin_plugin.InventoryProfilesNextMixinConfigPlugin",
+  "client": [
+    "printer.tweakeroo.MixinInputHandler",
+    "printer.ipn.MixinAutoRefillHandler",
+    "printer.ipn.MixinLockedSlotKeeper"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}
